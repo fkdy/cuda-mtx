@@ -7,6 +7,7 @@
 #include"assist.h"
 
 // square matrix multiplication
+// used for checking the results
 void mtxMultiplication(int *m, int *n, int *p, int rows)
 {
 	int i, j, k, temp, isNULL=0;
@@ -31,7 +32,7 @@ void mtxMultiplication(int *m, int *n, int *p, int rows)
 		free(p);
 }
 
-__global__ void mtxMultKernel(int *pmDev, int *pnDev, int *ppDev, int rows);
+__global__ void mtxMultKernel(int *pmDev, int *pnDev, int *ppDev, int tileRow, int mtxRow);
 
 // function port to cuda device
 void mtxMultCUDA(int *pm, int *pn, int *pp, int rows)
@@ -48,10 +49,10 @@ void mtxMultCUDA(int *pm, int *pn, int *pp, int rows)
 
 	// kernel invocation code
 	// 1.kernel configuration
-	dim3 dimBlock(rows, rows);
-	dim3 dimGrid(1,1);
+	dim3 dimBlock(rows/4, rows/4);
+	dim3 dimGrid(4,4);
 	// 2.lunch the kernel
-	mtxMultKernel<<<dimGrid, dimBlock>>>(pmDev, pnDev, ppDev, rows);
+	mtxMultKernel<<<dimGrid, dimBlock>>>(pmDev, pnDev, ppDev, 4, rows);
 	
 	// copy content of the result matrix form device to host
 	cudaMemcpy(pp, ppDev, size, cudaMemcpyDeviceToHost);
@@ -62,28 +63,38 @@ void mtxMultCUDA(int *pm, int *pn, int *pp, int rows)
 
 	// print out
 	int i=0;
-	for(i=0; i<rows*rows; i++){
-		fprintf(stdout, "%d ", pp[i]);
+	int j=0;
+	for(i=0; i<rows; i++){
+		for(j=0; j<rows; j++){
+			fprintf(stdout, "%d ", pp[i*rows + j]);
+		}
+		fprintf(stdout, "\n");
 	}
-	fprintf(stdout, "\nthe matrix: ");
-	for(i=0; i<rows*rows; i++){
+	fprintf(stdout, "\nthe matrix:\n");
+	for(i=0; i<rows; i++){
+		for(j=0; j<rows; j++){
+			fprintf(stdout, "%d ", pm[i*rows + j]);
+		}
+		fprintf(stdout, "\n");
+	}
+/*	for(i=0; i<rows*rows; i++){
 		fprintf(stdout, "%d ", pm[i]);
 	}
+*/
 }
 
 // matrix multipliction kernel function
-__global__ void mtxMultKernel(int *pmDev, int *pnDev, int *ppDev, int rows)
+__global__ void mtxMultKernel(int *pmDev, int *pnDev, int *ppDev, int tileRow, int mtxRow)
 {
 	// thread id 
 	//   n
 	// m p
 	// tx corresponding to matrix column indice
 	// tx -> matrix row number
-	int tx=threadIdx.x;
-	int ty=threadIdx.y;
-	int i=0;
-	int temp=0;
-	for(i=0; i<rows; i++)
-		temp+=pmDev[ty*rows + i]*pnDev[i*rows + tx];
-	ppDev[ty*rows + tx]=temp;
+	int c=blockIdx.x*tileRow+ threadIdx.x;
+	int r=blockIdx.y*tileRow+ threadIdx.y;
+	int i;
+	ppDev[r*mtxRow + c]=0;
+	for(i=0; i<mtxRow; i++)
+		ppDev[r*mtxRow + c]+=pmDev[r*mtxRow + i]*pnDev[i*mtxRow + c];
 }
